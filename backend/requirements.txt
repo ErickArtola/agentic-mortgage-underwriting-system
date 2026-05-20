@@ -10,13 +10,12 @@ langgraph==1.0.5
 # LangChain ecosystem (unpinned — let pip resolve compatible versions)
 langchain
 langchain-groq
-langchain-huggingface
 langchain-community
 langchain-text-splitters
 
 # LLM / embeddings
 groq
-sentence-transformers
+fastembed
 
 # Vector store (pinned — API changes between major versions)
 chromadb==1.4.0
