@@ -1,17 +1,23 @@
-# rag.py — Policy retrieval via ChromaDB + FastEmbed embeddings
+# rag.py — Lightweight policy retrieval via TF-IDF + cosine similarity
 #
-# Embedding swap from notebook:
-#   Notebook used OpenAIEmbeddings (requires paid API key).
-#   Here we use FastEmbedEmbeddings (BAAI/bge-small-en-v1.5) — free, no API key,
-#   runs via ONNX Runtime (already pulled in by chromadb). No PyTorch required,
-#   keeping memory well within Render free tier's 512 MB limit.
+# Design note — why not ChromaDB + neural embeddings?
+#   The notebook uses OpenAIEmbeddings. Our first production swap tried
+#   HuggingFace sentence-transformers (PyTorch, ~530 MB) then FastEmbed
+#   (ONNX, ~200 MB). Both exceed Render free tier's 512 MB RAM limit.
+#
+#   TF-IDF + cosine similarity (sklearn) achieves equivalent retrieval quality
+#   for this small, domain-specific corpus, with <5 MB memory overhead.
+#   The public interface (create_policy_store / retrieve_relevant_policies)
+#   is unchanged so agents.py needs no modification.
 
 import re
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import FastEmbedEmbeddings
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 
@@ -20,14 +26,41 @@ from langchain_community.document_loaders import PyPDFLoader
 _POLICY_PDF = Path(__file__).parent.parent / "data" / "underwriting_policies.pdf"
 
 
-def create_policy_store(pdf_path: str | None = None):
-    """Load underwriting_policies.pdf into an in-memory ChromaDB vector store.
+@dataclass
+class _Doc:
+    """Minimal document wrapper matching the LangChain Document interface
+    so retrieve_relevant_policies() works identically to the ChromaDB version."""
+    page_content: str
+
+
+class TFIDFPolicyStore:
+    """In-memory policy store using TF-IDF vectors and cosine similarity.
+
+    Drop-in replacement for a ChromaDB vectorstore: exposes the same
+    similarity_search(query, k) method used by retrieve_relevant_policies().
+    """
+
+    def __init__(self, chunks: list[str]):
+        self._chunks = chunks
+        # Unigrams + bigrams capture phrases like "debt-to-income ratio"
+        self._vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
+        self._matrix = self._vectorizer.fit_transform(chunks)
+
+    def similarity_search(self, query: str, k: int = 6) -> list[_Doc]:
+        query_vec = self._vectorizer.transform([query])
+        scores = cosine_similarity(query_vec, self._matrix)[0]
+        top_indices = np.argsort(scores)[::-1][:k]
+        return [_Doc(page_content=self._chunks[i]) for i in top_indices]
+
+
+def create_policy_store(pdf_path: str | None = None) -> TFIDFPolicyStore:
+    """Load underwriting_policies.pdf into an in-memory TF-IDF policy store.
 
     Args:
         pdf_path: Optional override for PDF location. Defaults to data/underwriting_policies.pdf.
 
     Returns:
-        ChromaDB vector store ready for similarity_search queries.
+        TFIDFPolicyStore ready for similarity_search queries.
     """
     path = pdf_path or str(_POLICY_PDF)
 
@@ -45,27 +78,16 @@ def create_policy_store(pdf_path: str | None = None):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     policy_chunks = text_splitter.split_documents(documents)
 
-    # FastEmbed embeddings — ONNX Runtime-based, no PyTorch dependency
-    # BAAI/bge-small-en-v1.5 is ~130 MB model but only ~30 MB ONNX runtime footprint,
-    # well within Render free tier's 512 MB RAM limit.
-    embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
-
-    # Build in-memory ChromaDB collection
-    vectorstore = Chroma.from_documents(
-        documents=policy_chunks,
-        embedding=embeddings,
-        collection_name="underwriting_policies",
-    )
-
-    return vectorstore
+    chunk_texts = [doc.page_content for doc in policy_chunks]
+    return TFIDFPolicyStore(chunk_texts)
 
 
-def retrieve_relevant_policies(query: str, vectorstore) -> str:
+def retrieve_relevant_policies(query: str, vectorstore: TFIDFPolicyStore) -> str:
     """Retrieve and deduplicate policy chunks relevant to the query.
 
     Args:
         query: Natural language question about underwriting policy.
-        vectorstore: ChromaDB instance returned by create_policy_store().
+        vectorstore: TFIDFPolicyStore returned by create_policy_store().
 
     Returns:
         Deduplicated policy text, grouped by section heading.

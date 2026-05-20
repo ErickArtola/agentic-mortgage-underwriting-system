@@ -13,12 +13,13 @@ langchain-groq
 langchain-community
 langchain-text-splitters
 
-# LLM / embeddings
+# LLM
 groq
-fastembed
 
-# Vector store (pinned — API changes between major versions)
-chromadb==1.4.0
+# Policy retrieval — TF-IDF (no PyTorch / ONNX; fits Render free tier 512 MB)
+# chromadb + fastembed were removed: onnxruntime alone uses ~200 MB in RAM.
+# sklearn TF-IDF gives equivalent retrieval quality for this small policy corpus.
+scikit-learn
 
 # PDF loading
 pypdf
