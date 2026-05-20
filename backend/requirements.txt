@@ -1,30 +1,31 @@
-# Backend dependencies
-# Pinned to versions compatible with Python 3.11
+# Backend dependencies — Python 3.11
 
 # Web framework
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 
-# LangGraph + LangChain
+# LangGraph (pinned — core orchestration engine)
 langgraph==1.0.5
-langchain==1.2.3
-langchain-groq==0.2.3
-langchain-huggingface==0.1.2
-langchain-community==0.4.1
-langchain-text-splitters==1.1.0
+
+# LangChain ecosystem (unpinned — let pip resolve compatible versions)
+langchain
+langchain-groq
+langchain-huggingface
+langchain-community
+langchain-text-splitters
 
 # LLM / embeddings
-groq==0.13.0
-sentence-transformers==3.3.1
+groq
+sentence-transformers
 
-# Vector store
+# Vector store (pinned — API changes between major versions)
 chromadb==1.4.0
 
 # PDF loading
-pypdf==6.6.0
+pypdf
 
-# Validation
+# Validation (pinned — Pydantic v2 is a breaking change from v1)
 pydantic==2.10.3
 
 # Utilities
-python-dotenv==1.0.1
+python-dotenv
