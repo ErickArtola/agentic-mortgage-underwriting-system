@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: mortgage-underwriting-api
+    runtime: python
+    plan: free                        # Render Hobby free tier (512 MB RAM)
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false                   # Set manually in Render dashboard — never commit this
+    healthCheckPath: /health

@@ -1,0 +1,31 @@
+# Backend dependencies
+# Pinned to versions compatible with Python 3.11
+
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# LangGraph + LangChain
+langgraph==1.0.5
+langchain==1.2.3
+langchain-core==0.3.28
+langchain-groq==0.2.3
+langchain-huggingface==0.1.2
+langchain-community==0.4.1
+langchain-text-splitters==1.1.0
+
+# LLM / embeddings
+groq==0.13.0
+sentence-transformers==3.3.1
+
+# Vector store
+chromadb==1.4.0
+
+# PDF loading
+pypdf==6.6.0
+
+# Validation
+pydantic==2.10.3
+
+# Utilities
+python-dotenv==1.0.1
