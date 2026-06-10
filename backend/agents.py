@@ -69,16 +69,32 @@ def sanitize_pii(data: Dict[str, Any]) -> Dict[str, Any]:
 def detect_bias_signals(analysis: str, applicant_data: Dict[str, Any]) -> List[str]:
     """Scan LLM output for potential Fair Lending Act violations."""
     flags = []
+    analysis_lower = analysis.lower()
+
+    # Standard protected terms — simple substring match is sufficient
     protected_terms = [
         "race", "color", "religion", "national origin",
-        "sex", "marital status", "age", "gender",
+        "sex", "marital status", "gender",
         "disability", "familial status",
     ]
-
-    analysis_lower = analysis.lower()
     for term in protected_terms:
         if term in analysis_lower:
             flags.append(f"Analysis mentions protected characteristic: {term}")
+
+    # "age" needs special handling — credit analysis legitimately references
+    # "account age", "tradeline age", "average age of credit history", etc.
+    # Strip those benign phrases first, then check for a remaining standalone "age".
+    _CREDIT_AGE_PHRASES = [
+        "account age", "tradeline age", "age of account", "age of credit",
+        "average age", "age of the account", "age of the tradeline",
+        "age of tradeline", "credit age", "loan age", "file age",
+        "oldest account", "oldest tradeline", "length of credit",
+    ]
+    age_text = analysis_lower
+    for phrase in _CREDIT_AGE_PHRASES:
+        age_text = age_text.replace(phrase, "")
+    if re.search(r"\bage\b", age_text):
+        flags.append("Analysis mentions protected characteristic: age")
 
     if "zip" in applicant_data or "zipcode" in applicant_data:
         if "neighborhood" in analysis_lower or "area" in analysis_lower:
@@ -460,13 +476,45 @@ def decision_agent_node(state: UnderwritingState, llm: ChatGroq) -> Underwriting
     system_prompt = """
 You are a Senior Underwriter who synthesizes all specialist analyses.
 
-Assign a risk score from 0 to 100 using these guidelines:
-- Credit score below 620: add 30 points
-- Credit score 620–679: add 15 points
-- DTI above 43%: add 20 points
-- LTV above 90%: add 15 points
-- Missing documentation: add 10 points
-- Strong reserves and excellent credit: subtract 10 points
+Assign a risk score from 0 to 100 by ADDING points for each applicable risk factor below.
+Apply every rule that fits — scores accumulate.
+
+CREDIT SCORE:
+- Below 620: +35 points
+- 620–679: +20 points
+- 680–719: +15 points
+- 720–759: +5 points
+- 760 or above: +0 points
+
+DEBT-TO-INCOME RATIO (DTI):
+- Above 50%: +35 points
+- 43%–50% inclusive: +25 points
+- 38%–42.9%: +15 points
+- Below 38%: +0 points
+
+LOAN-TO-VALUE RATIO (LTV):
+- Above 97%: +20 points
+- 90.1%–97%: +15 points
+- 80.1%–90%: +5 points
+- 80% or below: +0 points
+
+DEROGATORY HISTORY:
+- Bankruptcy in last 7 years: +15 points
+- Foreclosure in last 7 years: +15 points
+- 3 or more late payments in last 12 months: +10 points
+- 1–2 late payments in last 12 months: +5 points
+- Collections present: +5 points
+
+EMPLOYMENT / INCOME STABILITY:
+- Employment gap present OR less than 2 years at current employer: +5 points
+- Self-employed with declining income: +10 points
+
+PROPERTY / COLLATERAL:
+- Required repairs above $5,000: +5 points
+- Property condition C4 or worse: +5 points
+
+OFFSETTING STRENGTHS (subtract points):
+- Credit 760+, DTI below 36%, and no derogatory items: -10 points
 
 DECISION MAPPING:
 - 0–30: APPROVED
@@ -476,7 +524,7 @@ DECISION MAPPING:
 OUTPUT FORMAT (required — must appear exactly):
 RISK_SCORE: [number]
 DECISION: [APPROVED/CONDITIONAL_APPROVAL/DENIED]
-CREDIT_MEMO: [your detailed rationale]
+CREDIT_MEMO: [your detailed rationale showing which risk factors you applied and their point values]
 """
 
     user_prompt = f"""
@@ -511,11 +559,11 @@ Provide RISK_SCORE, DECISION, and CREDIT_MEMO.
 
     content = response.content
 
-    # Parse risk score
+    # Parse risk score — clamp to [0, 100]
     risk_score = 50  # safe default
-    match = re.search(r"RISK_SCORE:\s*(\d+)", content)
+    match = re.search(r"RISK_SCORE:\s*(-?\d+)", content)
     if match:
-        risk_score = int(match.group(1))
+        risk_score = max(0, min(100, int(match.group(1))))
 
     # Parse decision
     decision = "CONDITIONAL_APPROVAL"
