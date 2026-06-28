@@ -517,8 +517,8 @@ OFFSETTING STRENGTHS (subtract points):
 - Credit 760+, DTI below 36%, and no derogatory items: -10 points
 
 DECISION MAPPING:
-- 0–30: APPROVED
-- 31–64: CONDITIONAL_APPROVAL
+- 0–24: APPROVED
+- 25–64: CONDITIONAL_APPROVAL
 - 65–100: DENIED
 
 OUTPUT FORMAT (required — must appear exactly):
@@ -565,14 +565,15 @@ Provide RISK_SCORE, DECISION, and CREDIT_MEMO.
     if match:
         risk_score = max(0, min(100, int(match.group(1))))
 
-    # Parse decision
-    decision = "CONDITIONAL_APPROVAL"
-    if "APPROVED" in content and "CONDITIONAL" not in content:
+    # Python makes the final decision from the numeric risk score — more reliable
+    # than parsing the LLM's text output, which can misread boundary cases.
+    # Boundaries: 0-24 APPROVED | 25-64 CONDITIONAL_APPROVAL | 65-100 DENIED
+    if risk_score <= 24:
         decision = "APPROVED"
-    elif "DENIED" in content:
-        decision = "DENIED"
-    elif "CONDITIONAL_APPROVAL" in content or "CONDITIONAL APPROVAL" in content:
+    elif risk_score <= 64:
         decision = "CONDITIONAL_APPROVAL"
+    else:
+        decision = "DENIED"
 
     human_review_required = (
         risk_score >= 65
